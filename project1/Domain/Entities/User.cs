@@ -9,7 +9,8 @@ namespace project1.Domain.Entities
         public Guid Id { get; set; }
         public string Name { get; set; } = null!;
         public string Email { get; set; } = null!;
-        public string PasswordHash { get; set; } = null!;
+        public byte[] PasswordHash { get; set; } = null!;
+        public byte[] PasswordSalt { get; set; } = null!;
         public Role Role { get; set; }
         public bool IsActive { get; set; } = true;
         public DateTime CreatedDate { get; set; }

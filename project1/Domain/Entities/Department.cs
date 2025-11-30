@@ -10,6 +10,7 @@ namespace project1.Domain.Entities
         public string? Description { get; set; }
         public Guid? HeadOfDepartmentId { get; set; }
         public User? HeadOfDepartment { get; set; }
+        public bool IsActive { get; set; } = true;
         public DateTime CreatedDate { get; set; }
         public DateTime? UpdatedDate { get; set; }
 

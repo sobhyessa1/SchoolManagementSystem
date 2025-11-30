@@ -125,13 +125,14 @@ namespace project1.Infrastructure.Services
             }
 
             // Role validation
-            if (!Enum.TryParse<project1.Domain.Enums.UserRole>(request.Role, true, out var role))
+            var role = request.Role;
+            if (!Enum.IsDefined(typeof(project1.Domain.Enums.Role), role))
             {
                 throw new InvalidOperationException("Invalid role");
             }
 
             // Security check: Only Admin can create Admin/Teacher
-            if (!isAdminRequest && (role == project1.Domain.Enums.UserRole.Admin || role == project1.Domain.Enums.UserRole.Teacher))
+            if (!isAdminRequest && (role == project1.Domain.Enums.Role.Admin || role == project1.Domain.Enums.Role.Teacher))
             {
                 throw new UnauthorizedAccessException("You cannot register as Admin or Teacher");
             }

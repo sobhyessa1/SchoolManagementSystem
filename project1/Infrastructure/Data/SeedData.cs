@@ -11,36 +11,63 @@ namespace project1.Infrastructure.Data
         {
             if (!db.Users.Any())
             {
+                // Admin
+                byte[] adminHash, adminSalt;
+                using (var hmac = new System.Security.Cryptography.HMACSHA512())
+                {
+                    adminSalt = hmac.Key;
+                    adminHash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes("Admin@123"));
+                }
+
                 var admin = new User
                 {
                     Id = Guid.NewGuid(),
                     Name = "Admin User",
                     Email = "admin@school.test",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@123"),
+                    PasswordHash = adminHash,
+                    PasswordSalt = adminSalt,
                     Role = Role.Admin,
                     IsActive = true,
                     CreatedDate = DateTime.UtcNow
                 };
                 db.Users.Add(admin);
 
+                // Teacher
+                byte[] teacherHash, teacherSalt;
+                using (var hmac = new System.Security.Cryptography.HMACSHA512())
+                {
+                    teacherSalt = hmac.Key;
+                    teacherHash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes("Teacher@123"));
+                }
+
                 var teacher = new User
                 {
                     Id = Guid.NewGuid(),
                     Name = "Teacher One",
                     Email = "teacher1@school.test",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Teacher@123"),
+                    PasswordHash = teacherHash,
+                    PasswordSalt = teacherSalt,
                     Role = Role.Teacher,
                     IsActive = true,
                     CreatedDate = DateTime.UtcNow
                 };
                 db.Users.Add(teacher);
 
+                // Student
+                byte[] studentHash, studentSalt;
+                using (var hmac = new System.Security.Cryptography.HMACSHA512())
+                {
+                    studentSalt = hmac.Key;
+                    studentHash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes("Student@123"));
+                }
+
                 var student = new User
                 {
                     Id = Guid.NewGuid(),
                     Name = "Student One",
                     Email = "student1@school.test",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Student@123"),
+                    PasswordHash = studentHash,
+                    PasswordSalt = studentSalt,
                     Role = Role.Student,
                     IsActive = true,
                     CreatedDate = DateTime.UtcNow

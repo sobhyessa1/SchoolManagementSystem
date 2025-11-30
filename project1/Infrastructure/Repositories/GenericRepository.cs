@@ -55,7 +55,7 @@ namespace project1.Infrastructure.Repositories
         {
             // Check for Soft Delete (IsActive property)
             var isActiveProp = typeof(T).GetProperty("IsActive");
-            if (isActiveProp != null && isActiveProp.PropertyType == typeof(bool))
+            if (isActiveProp != null && isActiveProp.PropertyType == typeof(bool) && isActiveProp.CanWrite)
             {
                 isActiveProp.SetValue(entity, false);
                 Update(entity); // Will set UpdatedDate via Update method

@@ -200,4 +200,5 @@ D:\portfolois\school system\project1\bin\Debug\net9.0\Pipelines.Sockets.Unoffici
 D:\portfolois\school system\project1\bin\Debug\net9.0\StackExchange.Redis.dll
 D:\portfolois\school system\project1\obj\Debug\net9.0\swae.build.ex.cache
 D:\portfolois\school system\project1\bin\Debug\net9.0\appsettings.Production.json
+D:\portfolois\school system\project1\obj\Debug\net9.0\project1.sourcelink.json
 D:\portfolois\school system\project1\obj\Debug\net9.0\staticwebassets.upToDateCheck.txt
