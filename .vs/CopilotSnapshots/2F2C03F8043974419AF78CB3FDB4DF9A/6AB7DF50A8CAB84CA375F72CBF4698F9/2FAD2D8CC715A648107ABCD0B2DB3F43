@@ -1,0 +1,24 @@
+﻿using FluentValidation;
+using project1.Application.DTOs.Teacher;
+
+namespace project1.Application.Validation
+{
+    public class AttendanceMarkRequestValidator : AbstractValidator<AttendanceMarkRequest>
+    {
+        public AttendanceMarkRequestValidator()
+        {
+            RuleFor(x => x.ClassId)
+                .NotEmpty().WithMessage("ClassId is required");
+
+            RuleFor(x => x.StudentId)
+                .NotEmpty().WithMessage("StudentId is required");
+
+            RuleFor(x => x.Date)
+                .NotEmpty().WithMessage("Date is required")
+                .LessThanOrEqualTo(DateTime.UtcNow).WithMessage("Attendance date cannot be in the future");
+
+            RuleFor(x => x.Status)
+                .IsInEnum().WithMessage("Invalid attendance status");
+        }
+    }
+}

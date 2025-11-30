@@ -1,0 +1,60 @@
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using project1.Application.Interfaces;
+using System;
+using System.Security.Claims;
+using System.Threading.Tasks;
+
+namespace project1.Controllers.Student
+{
+    [ApiController]
+    [Route("api/student/[controller]")]
+    [Authorize(Roles = "Student")]
+    public class SubmissionsController : ControllerBase
+    {
+        private readonly ISubmissionService _service;
+
+        public SubmissionsController(ISubmissionService service)
+        {
+            _service = service;
+        }
+
+        [HttpPost("{assignmentId}/submit")]
+        public async Task<IActionResult> Submit(Guid assignmentId, [FromForm] FileSubmitModel model)
+        {
+            var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (!Guid.TryParse(sub, out var studentId)) return Forbid();
+
+            // For skeleton accept fileUrl or uploaded file. If file provided, return fake URL.
+            string? fileUrl = model.FileUrl;
+            if (model.File != null)
+            {
+                // In real app store file and return URL. Here use placeholder.
+                fileUrl = $"/files/{Guid.NewGuid()}_{model.File.FileName}";
+            }
+
+            try
+            {
+                await _service.SubmitAsync(assignmentId, studentId, fileUrl);
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        [HttpGet("assignment/{assignmentId}")]
+        public async Task<IActionResult> GetForAssignment(Guid assignmentId)
+        {
+            var items = await _service.GetSubmissionsForAssignmentAsync(assignmentId);
+            return Ok(items);
+        }
+    }
+
+    public class FileSubmitModel
+    {
+        public Microsoft.AspNetCore.Http.IFormFile? File { get; set; }
+        public string? FileUrl { get; set; }
+    }
+}

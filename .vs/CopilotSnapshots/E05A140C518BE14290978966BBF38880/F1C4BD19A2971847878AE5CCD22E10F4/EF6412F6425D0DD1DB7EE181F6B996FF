@@ -1,0 +1,16 @@
+﻿using AutoMapper;
+using project1.Application.DTOs;
+using project1.Application.DTOs.Admin;
+using project1.Domain.Entities;
+
+namespace project1.Application.Mapping
+{
+    public class AutoMapperProfile : Profile
+    {
+        public AutoMapperProfile()
+        {
+            CreateMap<User, UserDto>();
+            CreateMap<Department, DepartmentDto>();
+        }
+    }
+}

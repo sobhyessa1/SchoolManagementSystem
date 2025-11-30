@@ -1,0 +1,217 @@
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+using project1.Application.DTOs.Auth;
+using project1.Application.Interfaces;
+using project1.Domain.Entities;
+using project1.Infrastructure.Data;
+using System;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.Tasks;
+using BCryptNet = BCrypt.Net.BCrypt;
+
+namespace project1.Infrastructure.Services
+{
+    public class AuthService : IAuthService
+    {
+        private readonly SchoolDbContext _db;
+        private readonly IConfiguration _config;
+
+        // Simple in-memory failed attempts store for rate limiting (in real app use distributed cache)
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (int Attempts, DateTime? BlockedUntil)> _failedLogins = new();
+
+        public AuthService(SchoolDbContext db, IConfiguration config)
+        {
+            _db = db;
+            _config = config;
+        }
+
+        public async Task<AuthResponse> AuthenticateAsync(LoginRequest request, string ipAddress)
+        {
+            var rateCfg = _config.GetSection("RateLimiting");
+            var maxAttempts = rateCfg.GetValue<int?>("MaxFailedLoginAttempts") ?? 5;
+            var blockMinutes = rateCfg.GetValue<int?>("BlockMinutes") ?? 15;
+
+            var key = request.Email.ToLowerInvariant();
+            if (_failedLogins.TryGetValue(key, out var state) && state.BlockedUntil != null && state.BlockedUntil > DateTime.UtcNow)
+            {
+                throw new UnauthorizedAccessException("Too many failed attempts. Try later.");
+            }
+
+            var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.Email == request.Email);
+            if (user == null)
+            {
+                RecordFailedAttempt(key, maxAttempts, blockMinutes);
+                throw new UnauthorizedAccessException("Invalid credentials");
+            }
+
+            if (!BCryptNet.Verify(request.Password, user.PasswordHash))
+            {
+                RecordFailedAttempt(key, maxAttempts, blockMinutes);
+                throw new UnauthorizedAccessException("Invalid credentials");
+            }
+
+            // success — reset failed attempts
+            _failedLogins.TryRemove(key, out _);
+
+            var jwt = GenerateJwtToken(user);
+            var refreshToken = GenerateRefreshToken(ipAddress);
+            refreshToken.UserId = user.Id;
+
+            _db.RefreshTokens.Add(refreshToken);
+            await _db.SaveChangesAsync();
+
+            return new AuthResponse
+            {
+                AccessToken = jwt.token,
+                RefreshToken = refreshToken.Token,
+                ExpiresAt = jwt.expiresAt
+            };
+        }
+
+        private void RecordFailedAttempt(string key, int maxAttempts, int blockMinutes)
+        {
+            _failedLogins.AddOrUpdate(key, (1, null), (k, old) => (old.Attempts + 1, old.BlockedUntil));
+            var newVal = _failedLogins[key];
+            if (newVal.Attempts >= maxAttempts)
+            {
+                _failedLogins[key] = (newVal.Attempts, DateTime.UtcNow.AddMinutes(blockMinutes));
+            }
+        }
+
+        public async Task<AuthResponse> RefreshTokenAsync(string token, string ipAddress)
+        {
+            var rt = await _db.RefreshTokens.Include(r => r.User).SingleOrDefaultAsync(r => r.Token == token);
+            if (rt == null || !rt.IsActive) throw new UnauthorizedAccessException("Invalid refresh token");
+
+            // Revoke current and create new
+            rt.Revoked = DateTime.UtcNow;
+            rt.RevokedByIp = ipAddress;
+
+            var newRt = GenerateRefreshToken(ipAddress);
+            newRt.UserId = rt.UserId;
+            rt.ReplacedByToken = newRt.Token;
+
+            _db.RefreshTokens.Add(newRt);
+            await _db.SaveChangesAsync();
+
+            var jwt = GenerateJwtToken(rt.User);
+
+            return new AuthResponse
+            {
+                AccessToken = jwt.token,
+                RefreshToken = newRt.Token,
+                ExpiresAt = jwt.expiresAt
+            };
+        }
+
+        public async Task RevokeRefreshTokenAsync(string token, string ipAddress)
+        {
+            var rt = await _db.RefreshTokens.SingleOrDefaultAsync(r => r.Token == token);
+            if (rt == null || !rt.IsActive) return;
+            rt.Revoked = DateTime.UtcNow;
+            rt.RevokedByIp = ipAddress;
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task<AuthResponse> RegisterAsync(RegisterRequest request, string ipAddress, bool isAdminRequest = false)
+        {
+            // Only allow creating teachers/admins if called from admin context
+            if ((request.Role == Domain.Enums.Role.Teacher || request.Role == Domain.Enums.Role.Admin) && !isAdminRequest)
+            {
+                throw new UnauthorizedAccessException("Insufficient privileges to create this user role.");
+            }
+
+            var exists = await _db.Users.AnyAsync(u => u.Email == request.Email);
+            if (exists) throw new InvalidOperationException("Email already in use");
+
+            var user = new User
+            {
+                Id = Guid.NewGuid(),
+                Name = request.Name,
+                Email = request.Email,
+                PasswordHash = BCryptNet.HashPassword(request.Password),
+                Role = request.Role,
+                IsActive = true,
+                CreatedDate = DateTime.UtcNow
+            };
+
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync();
+
+            var jwt = GenerateJwtToken(user);
+            var refreshToken = GenerateRefreshToken(ipAddress);
+            refreshToken.UserId = user.Id;
+            _db.RefreshTokens.Add(refreshToken);
+            await _db.SaveChangesAsync();
+
+            return new AuthResponse
+            {
+                AccessToken = jwt.token,
+                RefreshToken = refreshToken.Token,
+                ExpiresAt = jwt.expiresAt
+            };
+        }
+
+        public async Task RevokeAllForUserAsync(Guid userId)
+        {
+            var tokens = await _db.RefreshTokens.Where(r => r.UserId == userId && r.Revoked == null).ToListAsync();
+            foreach (var t in tokens)
+            {
+                t.Revoked = DateTime.UtcNow;
+            }
+            await _db.SaveChangesAsync();
+        }
+
+        private (string token, DateTime expiresAt) GenerateJwtToken(User user)
+        {
+            var jwtSection = _config.GetSection("Jwt");
+            var key = jwtSection.GetValue<string>("Key") ?? throw new InvalidOperationException("Jwt:Key missing");
+            var issuer = jwtSection.GetValue<string>("Issuer");
+            var audience = jwtSection.GetValue<string>("Audience");
+            var minutes = jwtSection.GetValue<int?>("AccessTokenExpirationMinutes") ?? 15;
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var keyBytes = Encoding.UTF8.GetBytes(key);
+            var claims = new[]
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim(ClaimTypes.Role, user.Role.ToString())
+            };
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddMinutes(minutes),
+                Issuer = issuer,
+                Audience = audience,
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(keyBytes), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            var tokenString = tokenHandler.WriteToken(token);
+            return (tokenString, tokenDescriptor.Expires!.Value);
+        }
+
+        private RefreshToken GenerateRefreshToken(string ipAddress)
+        {
+            var jwtSection = _config.GetSection("Jwt");
+            var days = jwtSection.GetValue<int?>("RefreshTokenExpirationDays") ?? 7;
+
+            var randomBytes = RandomNumberGenerator.GetBytes(64);
+            var token = Convert.ToBase64String(randomBytes);
+
+            return new RefreshToken
+            {
+                Token = token,
+                Expires = DateTime.UtcNow.AddDays(days),
+                Created = DateTime.UtcNow,
+                CreatedByIp = ipAddress
+            };
+        }
+    }
+}

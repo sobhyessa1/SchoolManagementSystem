@@ -1,0 +1,16 @@
+using System;
+using System.Threading.Tasks;
+using project1.Application.DTOs.Admin;
+using project1.Application.DTOs;
+
+namespace project1.Application.Interfaces
+{
+    public interface IDepartmentService
+    {
+        Task<PagedResult<DepartmentDto>> GetDepartmentsAsync(int page, int pageSize, string? filter);
+        Task<DepartmentDto?> GetByIdAsync(Guid id);
+        Task<DepartmentDto> CreateAsync(CreateDepartmentRequest request);
+        Task UpdateAsync(Guid id, CreateDepartmentRequest request);
+        Task DeleteAsync(Guid id);
+    }
+}

@@ -1,0 +1,63 @@
+﻿using Microsoft.EntityFrameworkCore;
+using project1.Infrastructure.Data;
+using Serilog;
+using System.Reflection;
+
+namespace project1
+{
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+            // Configure Serilog
+            Log.Logger = new LoggerConfiguration()
+                .Enrich.FromLogContext()
+                .WriteTo.Console()
+                .CreateLogger();
+
+            var builder = WebApplication.CreateBuilder(args);
+
+            builder.Host.UseSerilog();
+
+            // Add services to the container.
+            builder.Services.AddControllers();
+
+            // Add DbContext (use in-memory SQLite for initial skeleton)
+            var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+                                   ?? "Data Source=school.db";
+            builder.Services.AddDbContext<SchoolDbContext>(options =>
+                options.UseSqlite(connectionString));
+
+            // AutoMapper
+            builder.Services.AddAutoMapper(Assembly.GetExecutingAssembly());
+
+            // Swagger
+            builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddSwaggerGen();
+
+            var app = builder.Build();
+
+            // Configure the HTTP request pipeline.
+            if (app.Environment.IsDevelopment())
+            {
+                app.UseSwagger();
+                app.UseSwaggerUI();
+            }
+
+            app.UseHttpsRedirection();
+
+            app.UseAuthorization();
+
+            app.MapControllers();
+
+            // Ensure DB created
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SchoolDbContext>();
+                db.Database.EnsureCreated();
+            }
+
+            app.Run();
+        }
+    }
+}

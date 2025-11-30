@@ -1,0 +1,83 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using project1.Infrastructure.Data;
+using System.Linq;
+using Microsoft.Extensions.Configuration;
+using System.Collections.Generic;
+using Microsoft.Extensions.Hosting;
+
+namespace project1.Tests
+{
+    public class TestWebFactory : WebApplicationFactory<project1.Program>
+    {
+        private SqliteConnection? _connection;
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Testing");
+
+            // Provide minimal configuration values required (Jwt keys etc.)
+            builder.ConfigureAppConfiguration((context, conf) =>
+            {
+                var settings = new Dictionary<string, string>
+                {
+                    ["Jwt:Key"] = "TestSecretKeyForDevelopmentOnlyMustBeLongEnough",
+                    ["Jwt:Issuer"] = "project1",
+                    ["Jwt:Audience"] = "project1_users",
+                    ["ConnectionStrings:DefaultConnection"] = "DataSource=:memory:"
+                };
+                conf.AddInMemoryCollection(settings);
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                // Remove existing DbContext registration(s)
+                var descriptors = services.Where(d => d.ServiceType == typeof(DbContextOptions<SchoolDbContext>) || d.ServiceType == typeof(SchoolDbContext)).ToList();
+                foreach (var d in descriptors) services.Remove(d);
+
+                // Register EF Sqlite provider explicitly
+                services.AddEntityFrameworkSqlite();
+
+                // Create and open connection here and register it as singleton
+                _connection = new SqliteConnection("DataSource=:memory:");
+                _connection.Open();
+                services.AddSingleton(_connection);
+
+                services.AddDbContext<SchoolDbContext>(options =>
+                {
+                    options.UseSqlite(_connection);
+                });
+
+                // Do not build provider here or call EnsureCreated; will be done after host creation
+            });
+        }
+
+        protected override IHost CreateHost(IHostBuilder builder)
+        {
+            var host = base.CreateHost(builder);
+
+            // Ensure database is created and seeded using the host's service provider
+            using (var scope = host.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SchoolDbContext>();
+                db.Database.EnsureCreated();
+                project1.Infrastructure.Data.SeedData.EnsureSeedData(db);
+            }
+
+            return host;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                _connection?.Close();
+                _connection?.Dispose();
+            }
+        }
+    }
+}

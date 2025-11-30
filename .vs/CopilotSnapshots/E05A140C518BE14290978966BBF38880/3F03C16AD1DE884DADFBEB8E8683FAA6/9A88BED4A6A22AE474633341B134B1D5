@@ -1,0 +1,226 @@
+﻿using Microsoft.EntityFrameworkCore;
+using project1.Infrastructure.Data;
+using Serilog;
+using System.Reflection;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using project1.Application.Interfaces;
+using project1.Infrastructure.Services;
+using project1.Application.Services;
+using FluentValidation;
+using project1.Application.DTOs.Auth;
+using project1.Application.Validation;
+using project1.Application.Middleware;
+using System.Data.Common;
+using System.IO;
+
+namespace project1
+{
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+            // Configure Serilog
+            Log.Logger = new LoggerConfiguration()
+                .Enrich.FromLogContext()
+                .WriteTo.Console()
+                .CreateLogger();
+
+            var builder = WebApplication.CreateBuilder(args);
+
+            builder.Host.UseSerilog();
+
+            // Add services to the container.
+            builder.Services.AddControllers();
+            builder.Services.AddMemoryCache();
+
+            // Redis distributed cache if configured
+            var redisConnection = builder.Configuration.GetValue<string>("Redis:ConnectionString");
+            if (!string.IsNullOrWhiteSpace(redisConnection))
+            {
+                builder.Services.AddStackExchangeRedisCache(options =>
+                {
+                    options.Configuration = redisConnection;
+                });
+            }
+
+            // FluentValidation
+            builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
+
+            // Add DbContext (SQL Server in Docker)
+            var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+                                   ?? "Data Source=school.db";
+            builder.Services.AddDbContext<SchoolDbContext>(options =>
+                options.UseSqlServer(connectionString));
+
+            // AutoMapper
+            builder.Services.AddAutoMapper(Assembly.GetExecutingAssembly());
+
+            // JWT
+            var jwtSection = builder.Configuration.GetSection("Jwt");
+            var key = jwtSection.GetValue<string>("Key");
+            // For testing environment, provide a default key if not configured
+            if (string.IsNullOrWhiteSpace(key) && builder.Environment.IsEnvironment("Testing"))
+            {
+                key = "TestSecretKeyForDevelopmentOnlyMustBeLongEnough";
+            }
+            var issuer = jwtSection.GetValue<string>("Issuer");
+            var audience = jwtSection.GetValue<string>("Audience");
+
+            if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Jwt:Key missing");
+
+            var keyBytes = Encoding.UTF8.GetBytes(key ?? throw new InvalidOperationException("Jwt:Key missing"));
+
+            builder.Services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            }).AddJwtBearer(options =>
+            {
+                options.RequireHttpsMetadata = false;
+                options.SaveToken = true;
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = issuer,
+                    ValidAudience = audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(keyBytes)
+                };
+            });
+
+            builder.Services.AddAuthorization();
+
+            // Register Services
+            builder.Services.AddScoped<IAuthService, AuthService>();
+            builder.Services.AddScoped<IDepartmentService, DepartmentService>();
+            builder.Services.AddScoped<ICourseService, CourseService>();
+            builder.Services.AddScoped<IClassService, ClassService>();
+            builder.Services.AddScoped<IAttendanceService, AttendanceService>();
+            builder.Services.AddScoped<IAssignmentService, AssignmentService>();
+            builder.Services.AddScoped<ISubmissionService, SubmissionService>();
+            builder.Services.AddScoped<IUserService, UserService>();
+
+            // Background cleanup - only run in non-testing environments
+            if (!builder.Environment.IsEnvironment("Testing"))
+            {
+                builder.Services.AddHostedService<RefreshTokenCleanupService>();
+            }
+
+            // Swagger
+            builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddSwaggerGen(c =>
+            {
+                // Add JWT Authorization to swagger
+                c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                {
+                    Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",
+                    Name = "Authorization",
+                    In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+                    Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+                    Scheme = "bearer"
+                });
+                c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+                {
+                    {
+                        new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                        {
+                            Reference = new Microsoft.OpenApi.Models.OpenApiReference { Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme, Id = "Bearer" }
+                        },
+                        new string[] { }
+                    }
+                });
+            });
+
+            var app = builder.Build();
+
+            // Configure the HTTP request pipeline.
+            app.UseMiddleware<GlobalExceptionMiddleware>();
+
+            if (app.Environment.IsDevelopment())
+            {
+                app.UseSwagger();
+                app.UseSwaggerUI();
+            }
+
+            // Serve uploads folder as static files
+            var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
+            if (!Directory.Exists(uploadsPath)) Directory.CreateDirectory(uploadsPath);
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsPath),
+                RequestPath = "/uploads"
+            });
+
+            app.UseHttpsRedirection();
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.MapControllers();
+
+            // Ensure DB created and run migrations
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<SchoolDbContext>();
+                if (!app.Environment.IsEnvironment("Testing"))
+                {
+                    var conn = db.Database.GetDbConnection();
+                    conn.Open();
+                    try
+                    {
+                        try
+                        {
+                            // Try applying migrations normally
+                            db.Database.Migrate();
+                        }
+                        catch (DbException ex)
+                        {
+                            // If migration fails because objects already exist, create migrations history table and mark migrations as applied
+                            var message = ex.Message ?? string.Empty;
+                            if (message.Contains("There is already an object named") || message.Contains("already an object named"))
+                            {
+                                using var cmd = conn.CreateCommand();
+                                cmd.CommandText = "IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '__EFMigrationsHistory') CREATE TABLE __EFMigrationsHistory (MigrationId nvarchar(150) NOT NULL, ProductVersion nvarchar(32) NOT NULL, CONSTRAINT PK___EFMigrationsHistory PRIMARY KEY (MigrationId));";
+                                cmd.ExecuteNonQuery();
+
+                                var migrationsDir = Path.Combine(app.Environment.ContentRootPath, "Infrastructure", "Data", "Migrations");
+                                if (Directory.Exists(migrationsDir))
+                                {
+                                    var files = Directory.GetFiles(migrationsDir, "*.cs");
+                                    foreach (var f in files)
+                                    {
+                                        var name = Path.GetFileNameWithoutExtension(f);
+                                        if (name.EndsWith(".Designer") || name.Contains("ModelSnapshot")) continue;
+                                        var migrationId = name;
+                                        using var insertCmd = conn.CreateCommand();
+                                        insertCmd.CommandText = "IF NOT EXISTS (SELECT 1 FROM __EFMigrationsHistory WHERE MigrationId = @id) INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES (@id, @pv)";
+                                        var p1 = insertCmd.CreateParameter(); p1.ParameterName = "@id"; p1.Value = migrationId; insertCmd.Parameters.Add(p1);
+                                        var p2 = insertCmd.CreateParameter(); p2.ParameterName = "@pv"; p2.Value = "9.0.0"; insertCmd.Parameters.Add(p2);
+                                        try { insertCmd.ExecuteNonQuery(); } catch { }
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        conn.Close();
+                    }
+
+                    // Always run seeding
+                    SeedData.EnsureSeedData(db);
+                }
+            }
+
+            app.Run();
+        }
+    }
+}

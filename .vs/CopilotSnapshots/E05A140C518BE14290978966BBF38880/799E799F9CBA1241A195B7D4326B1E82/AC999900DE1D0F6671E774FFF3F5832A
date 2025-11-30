@@ -1,0 +1,97 @@
+﻿using AutoMapper;
+using Microsoft.EntityFrameworkCore;
+using project1.Application.DTOs;
+using project1.Application.DTOs.Admin;
+using project1.Application.Interfaces;
+using project1.Domain.Entities;
+using project1.Infrastructure.Data;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace project1.Application.Services
+{
+    public class DepartmentService : IDepartmentService
+    {
+        private readonly SchoolDbContext _db;
+        private readonly IMapper _mapper;
+
+        public DepartmentService(SchoolDbContext db, IMapper mapper)
+        {
+            _db = db;
+            _mapper = mapper;
+        }
+
+        public async Task<PagedResult<DepartmentDto>> GetDepartmentsAsync(int page, int pageSize, string? filter)
+        {
+            var query = _db.Departments.AsNoTracking();
+            if (!string.IsNullOrWhiteSpace(filter))
+            {
+                query = query.Where(d => d.Name.Contains(filter));
+            }
+
+            var total = await query.LongCountAsync();
+            var items = await query.OrderByDescending(d => d.CreatedDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PagedResult<DepartmentDto>
+            {
+                Page = page,
+                PageSize = pageSize,
+                Total = total,
+                Items = items.Select(d => _mapper.Map<DepartmentDto>(d))
+            };
+        }
+
+        public async Task<DepartmentDto?> GetByIdAsync(Guid id)
+        {
+            var d = await _db.Departments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id);
+            return d == null ? null : _mapper.Map<DepartmentDto>(d);
+        }
+
+        public async Task<DepartmentDto> CreateAsync(CreateDepartmentRequest request)
+        {
+            var exists = await _db.Departments.AnyAsync(d => d.Name == request.Name);
+            if (exists) throw new InvalidOperationException("Department name already exists");
+
+            var dept = new Department
+            {
+                Id = Guid.NewGuid(),
+                Name = request.Name,
+                Description = request.Description,
+                HeadOfDepartmentId = request.HeadOfDepartmentId,
+                CreatedDate = DateTime.UtcNow
+            };
+
+            _db.Departments.Add(dept);
+            await _db.SaveChangesAsync();
+
+            return _mapper.Map<DepartmentDto>(dept);
+        }
+
+        public async Task UpdateAsync(Guid id, CreateDepartmentRequest request)
+        {
+            var dept = await _db.Departments.FindAsync(id);
+            if (dept == null) throw new InvalidOperationException("Department not found");
+
+            dept.Name = request.Name;
+            dept.Description = request.Description;
+            dept.HeadOfDepartmentId = request.HeadOfDepartmentId;
+            dept.UpdatedDate = DateTime.UtcNow;
+
+            _db.Departments.Update(dept);
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task DeleteAsync(Guid id)
+        {
+            var dept = await _db.Departments.FindAsync(id);
+            if (dept == null) throw new InvalidOperationException("Department not found");
+
+            _db.Departments.Remove(dept);
+            await _db.SaveChangesAsync();
+        }
+    }
+}

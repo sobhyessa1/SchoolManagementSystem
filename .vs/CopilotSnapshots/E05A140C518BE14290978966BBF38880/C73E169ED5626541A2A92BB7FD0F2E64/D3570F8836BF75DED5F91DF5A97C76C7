@@ -1,0 +1,32 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore
+        run: dotnet restore project1/project1.csproj
+
+      - name: Build
+        run: dotnet build project1/project1.csproj --no-restore --configuration Release
+
+      - name: Run tests
+        run: dotnet test project1.Tests/project1.Tests.csproj --no-build --verbosity normal
+
+      - name: Publish
+        if: success()
+        run: dotnet publish project1/project1.csproj -c Release -o out

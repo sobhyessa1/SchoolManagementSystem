@@ -1,0 +1,78 @@
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using project1.Application.DTOs.Teacher;
+using project1.Application.Interfaces;
+using System;
+using System.Security.Claims;
+using System.Threading.Tasks;
+
+namespace project1.Controllers.Teacher
+{
+    [ApiController]
+    [Route("api/teacher/[controller]")]
+    [Authorize(Roles = "Teacher")]
+    public class AssignmentsController : ControllerBase
+    {
+        private readonly IAssignmentService _service;
+
+        public AssignmentsController(IAssignmentService service)
+        {
+            _service = service;
+        }
+
+        [HttpGet("class/{classId}")]
+        public async Task<IActionResult> GetForClass(Guid classId, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+        {
+            var result = await _service.GetAssignmentsForClassAsync(classId, page, pageSize);
+            return Ok(result);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] CreateAssignmentRequest request)
+        {
+            var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (!Guid.TryParse(sub, out var teacherId)) return Forbid();
+
+            try
+            {
+                var dto = await _service.CreateAsync(request, teacherId);
+                return CreatedAtAction(nameof(GetForClass), new { classId = dto.ClassId }, dto);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+        }
+
+        [HttpPost("submissions/{submissionId}/grade")]
+        public async Task<IActionResult> Grade(Guid submissionId, [FromBody] GradeRequest model)
+        {
+            var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (!Guid.TryParse(sub, out var teacherId)) return Forbid();
+
+            try
+            {
+                await _service.GradeSubmissionAsync(submissionId, model.Grade, teacherId, model.Remarks);
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+        }
+    }
+
+    public class GradeRequest
+    {
+        public decimal Grade { get; set; }
+        public string? Remarks { get; set; }
+    }
+}

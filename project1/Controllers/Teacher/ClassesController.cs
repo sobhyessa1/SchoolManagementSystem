@@ -1,0 +1,85 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using project1.Application.DTOs.Teacher;
+using project1.Application.Interfaces;
+using System;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using project1.Application.Helpers;
+
+namespace project1.Controllers.Teacher
+{
+    [ApiController]
+    [Route("api/teacher/[controller]")]
+    [Authorize(Roles = "Teacher")]
+    public class ClassesController : ControllerBase
+    {
+        private readonly IClassService _service;
+
+        public ClassesController(IClassService service)
+        {
+            _service = service;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> Get(int page = 1, int pageSize = 10)
+        {
+            var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (!Guid.TryParse(sub, out var teacherId)) return Forbid();
+
+            var result = await _service.GetClassesForTeacherAsync(teacherId, page, pageSize);
+            PaginationHelper.AddPaginationHeader(Response, result);
+            return Ok(result);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(Guid id)
+        {
+            var dto = await _service.GetByIdAsync(id);
+            if (dto == null) return NotFound();
+            return Ok(dto);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] CreateClassRequest request)
+        {
+            try
+            {
+                var dto = await _service.CreateAsync(request);
+                return CreatedAtAction(nameof(GetById), new { id = dto.Id }, dto);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(Guid id, [FromBody] CreateClassRequest request)
+        {
+            try
+            {
+                await _service.UpdateAsync(id, request);
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/students")]
+        public async Task<IActionResult> AssignStudents(Guid id, [FromBody] Guid[] studentIds)
+        {
+            try
+            {
+                await _service.AssignStudentsAsync(id, studentIds);
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+    }
+}

@@ -1,0 +1,14 @@
+﻿using System.Threading.Tasks;
+using project1.Application.DTOs.Auth;
+
+namespace project1.Application.Interfaces
+{
+    public interface IAuthService
+    {
+        Task<AuthResponse> AuthenticateAsync(LoginRequest request, string ipAddress);
+        Task<AuthResponse> RefreshTokenAsync(string token, string ipAddress);
+        Task RevokeRefreshTokenAsync(string token, string ipAddress);
+        Task<AuthResponse> RegisterAsync(RegisterRequest request, string ipAddress, bool isAdminRequest = false);
+        Task RevokeAllForUserAsync(System.Guid userId);
+    }
+}

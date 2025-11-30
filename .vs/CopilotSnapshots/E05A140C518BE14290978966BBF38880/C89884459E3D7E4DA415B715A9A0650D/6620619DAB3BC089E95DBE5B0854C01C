@@ -1,0 +1,26 @@
+﻿{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost,1433;Database=SchoolDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True"
+  },
+  "Jwt": {
+    "Key": "ReplaceWithVeryStrongSecretKeyForDevelopmentOnlyChangeInProd",
+    "Issuer": "project1",
+    "Audience": "project1_users",
+    "AccessTokenExpirationMinutes": 15,
+    "RefreshTokenExpirationDays": 7
+  },
+  "RateLimiting": {
+    "MaxFailedLoginAttempts": 5,
+    "BlockMinutes": 15
+  },
+  "RefreshTokenCleanup": {
+    "DeleteExpiredAfterDays": 30,
+    "CleanupIntervalMinutes": 60
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}

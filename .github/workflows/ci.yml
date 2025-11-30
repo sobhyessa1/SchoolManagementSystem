@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2019-latest
+        env:
+          SA_PASSWORD: YourStrong!Passw0rd
+          ACCEPT_EULA: "Y"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd="/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourStrong!Passw0rd -Q \"select 1\""
+          --health-interval=10s --health-timeout=10s --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore
+        run: dotnet restore project1/project1.csproj
+
+      - name: Build
+        run: dotnet build project1/project1.csproj --no-restore --configuration Release
+
+      - name: Apply EF Migrations
+        env:
+          ConnectionStrings__DefaultConnection: "Server=localhost,1433;Database=schoolsystem;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True"
+        run: |
+          dotnet ef database update --project project1 --startup-project project1
+
+      - name: Run tests
+        run: dotnet test project1.Tests/project1.Tests.csproj --no-build --verbosity normal
+
+      - name: Publish
+        if: success()
+        run: dotnet publish project1/project1.csproj -c Release -o out

@@ -1,0 +1,134 @@
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+using project1.Application.DTOs.Auth;
+using project1.Application.Interfaces;
+using project1.Domain.Entities;
+using project1.Infrastructure.Data;
+using System;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace project1.Infrastructure.Services
+{
+    public class AuthService : IAuthService
+    {
+        private readonly SchoolDbContext _db;
+        private readonly IConfiguration _config;
+
+        public AuthService(SchoolDbContext db, IConfiguration config)
+        {
+            _db = db;
+            _config = config;
+        }
+
+        public async Task<AuthResponse> AuthenticateAsync(LoginRequest request, string ipAddress)
+        {
+            var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.Email == request.Email);
+            if (user == null) throw new UnauthorizedAccessException("Invalid credentials");
+
+            // For skeleton: password is stored as plain hash in PasswordHash, use BCrypt or similar later.
+            if (user.PasswordHash != request.Password) throw new UnauthorizedAccessException("Invalid credentials");
+
+            var jwt = GenerateJwtToken(user);
+            var refreshToken = GenerateRefreshToken(ipAddress);
+            refreshToken.UserId = user.Id;
+
+            _db.RefreshTokens.Add(refreshToken);
+            await _db.SaveChangesAsync();
+
+            return new AuthResponse
+            {
+                AccessToken = jwt.token,
+                RefreshToken = refreshToken.Token,
+                ExpiresAt = jwt.expiresAt
+            };
+        }
+
+        public async Task<AuthResponse> RefreshTokenAsync(string token, string ipAddress)
+        {
+            var rt = await _db.RefreshTokens.Include(r => r.User).SingleOrDefaultAsync(r => r.Token == token);
+            if (rt == null || !rt.IsActive) throw new UnauthorizedAccessException("Invalid refresh token");
+
+            // Revoke current and create new
+            rt.Revoked = DateTime.UtcNow;
+            rt.RevokedByIp = ipAddress;
+
+            var newRt = GenerateRefreshToken(ipAddress);
+            newRt.UserId = rt.UserId;
+            rt.ReplacedByToken = newRt.Token;
+
+            _db.RefreshTokens.Add(newRt);
+            await _db.SaveChangesAsync();
+
+            var jwt = GenerateJwtToken(rt.User);
+
+            return new AuthResponse
+            {
+                AccessToken = jwt.token,
+                RefreshToken = newRt.Token,
+                ExpiresAt = jwt.expiresAt
+            };
+        }
+
+        public async Task RevokeRefreshTokenAsync(string token, string ipAddress)
+        {
+            var rt = await _db.RefreshTokens.SingleOrDefaultAsync(r => r.Token == token);
+            if (rt == null || !rt.IsActive) return;
+            rt.Revoked = DateTime.UtcNow;
+            rt.RevokedByIp = ipAddress;
+            await _db.SaveChangesAsync();
+        }
+
+        private (string token, DateTime expiresAt) GenerateJwtToken(User user)
+        {
+            var jwtSection = _config.GetSection("Jwt");
+            var key = jwtSection.GetValue<string>("Key") ?? throw new InvalidOperationException("Jwt:Key missing");
+            var issuer = jwtSection.GetValue<string>("Issuer");
+            var audience = jwtSection.GetValue<string>("Audience");
+            var minutes = jwtSection.GetValue<int?>("AccessTokenExpirationMinutes") ?? 15;
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var keyBytes = Encoding.UTF8.GetBytes(key);
+            var claims = new[]
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim(ClaimTypes.Role, user.Role.ToString())
+            };
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddMinutes(minutes),
+                Issuer = issuer,
+                Audience = audience,
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(keyBytes), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            var tokenString = tokenHandler.WriteToken(token);
+            return (tokenString, tokenDescriptor.Expires!.Value);
+        }
+
+        private RefreshToken GenerateRefreshToken(string ipAddress)
+        {
+            var jwtSection = _config.GetSection("Jwt");
+            var days = jwtSection.GetValue<int?>("RefreshTokenExpirationDays") ?? 7;
+
+            var randomBytes = RandomNumberGenerator.GetBytes(64);
+            var token = Convert.ToBase64String(randomBytes);
+
+            return new RefreshToken
+            {
+                Token = token,
+                Expires = DateTime.UtcNow.AddDays(days),
+                Created = DateTime.UtcNow,
+                CreatedByIp = ipAddress
+            };
+        }
+    }
+}

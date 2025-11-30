@@ -1,0 +1,50 @@
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using project1.Infrastructure.Data;
+using System;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+
+namespace project1.Controllers.Student
+{
+    [ApiController]
+    [Route("api/student/[controller]")]
+    [Authorize(Roles = "Student")]
+    public class StudentController : ControllerBase
+    {
+        private readonly SchoolDbContext _db;
+
+        public StudentController(SchoolDbContext db)
+        {
+            _db = db;
+        }
+
+        [HttpGet("attendance")]
+        public async Task<IActionResult> GetAttendance([FromQuery] Guid? classId = null, [FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
+        {
+            var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (!Guid.TryParse(sub, out var studentId)) return Forbid();
+
+            var query = _db.Attendances.AsNoTracking().Where(a => a.StudentId == studentId);
+            if (classId != null) query = query.Where(a => a.ClassId == classId);
+            if (from != null) query = query.Where(a => a.Date >= from.Value.Date);
+            if (to != null) query = query.Where(a => a.Date <= to.Value.Date);
+
+            var items = await query.OrderByDescending(a => a.Date).ToListAsync();
+
+            var result = items.Select(a => new {
+                a.Id,
+                a.ClassId,
+                a.StudentId,
+                Date = a.Date,
+                Status = a.Status.ToString(),
+                a.MarkedByTeacherId,
+                a.CreatedDate
+            });
+
+            return Ok(result);
+        }
+    }
+}

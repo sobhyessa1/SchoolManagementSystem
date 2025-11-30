@@ -1,0 +1,136 @@
+﻿# School Management API (skeleton)
+
+Overview
+
+This repository contains a .NET 9 Web API skeleton for a School Management System implementing the main project requirements: EF Core code-first, JWT auth with refresh tokens, role-based authorization (Admin/Teacher/Student), services & repositories, AutoMapper, FluentValidation, Serilog, in-memory caching for lists, file uploads for submissions, migrations and seed data, and tests.
+
+Development quick start
+
+1. Start SQL Server and the API in Docker:
+
+   docker compose up -d
+
+   This will start SQL Server and the API container. The API will use the environment connection string to connect to SQL Server and apply migrations on startup.
+
+2. Alternatively for local development (no Docker):
+
+   - Ensure SQL Server is running locally and update `project1/appsettings.Development.json` connection string.
+   - Run migrations and seed:
+     ```powershell
+     cd project1
+     .\scripts\create_db_and_migrate.ps1
+     ```
+
+3. Run the API locally:
+
+   dotnet run --project project1
+
+4. Run tests:
+
+   dotnet test project1.Tests/project1.Tests.csproj
+
+Notes
+- Secrets (JWT key, DB passwords) should be placed in environment variables or user-secrets in production.
+- Uploads are stored in `project1/uploads` by default.
+
+Quick start (development)
+
+Prerequisites
+- .NET 9 SDK
+- dotnet-ef tool (optional, used below)
+
+Restore & build
+
+dotnet restore
+dotnet build
+
+Run locally
+
+dotnet run --project project1
+
+By default the app uses SQLite (Data Source=school.db). Development settings are in project1/appsettings.Development.json.
+
+Swagger
+
+When running in Development the Swagger UI is available at: https://localhost:5001/swagger
+
+Database migrations
+
+Add migration (if you change the model):
+
+  dotnet ef migrations add NameOfMigration --project project1 --startup-project project1 --output-dir Infrastructure/Data/Migrations
+
+Apply migrations:
+
+  dotnet ef database update --project project1 --startup-project project1
+
+Seed data
+
+On first run the app will ensure the database is created and seed initial data (Admin, Teacher, Student, Department, Course, Class) via the SeedData helper.
+
+Default seeded credentials (development):
+- admin@school.test / Admin@123 (Admin)
+- teacher1@school.test / Teacher@123 (Teacher)
+- student1@school.test / Student@123 (Student)
+
+Auth endpoints
+
+- POST /api/auth/register
+- POST /api/auth/login -> returns accessToken + refreshToken
+- POST /api/auth/refresh-token
+- POST /api/auth/revoke-token
+
+Admin endpoints (require Admin role)
+- /api/admin/departments
+- /api/admin/courses
+
+Teacher endpoints (require Teacher role)
+- /api/teacher/classes
+- /api/teacher/attendance
+- /api/teacher/assignments
+
+Student endpoints (require Student role)
+- /api/student/submissions
+
+File uploads
+
+Student submission uploads are saved under the app uploads directory and served via /uploads/{fileName}. Max allowed file size configured in controller: 5 MB. Allowed extensions: .pdf, .doc, .docx, .zip, .txt.
+
+Configuration
+
+Edit project1/appsettings.Development.json to change JWT secret and DB connection string.
+
+Example JWT settings:
+
+  "Jwt": {
+    "Key": "ReplaceWithVeryStrongSecretKeyForDevelopmentOnlyChangeInProd",
+    "Issuer": "project1",
+    "Audience": "project1_users",
+    "AccessTokenExpirationMinutes": 15,
+    "RefreshTokenExpirationDays": 7
+  }
+
+Tests
+
+Run unit tests:
+
+  dotnet test project1.Tests/project1.Tests.csproj
+
+Notes & next steps
+
+This skeleton implements primary flows and patterns from the project spec but needs further polishing for production:
+- Move secrets to environment variables or a secrets store
+- Add more unit & integration tests (auth flow, attendance, submissions)
+- Add rate limiting and login throttling
+- Harden file upload checks (virus scanning / MIME checks)
+- Add CI pipeline and containerized SQL Server with docker-compose
+
+Postman collection
+
+A minimal Postman collection skeleton is included at postman/SchoolManagement.postman_collection.json
+
+If you want I can now:
+- add integration tests for auth flow and teacher/student scenarios
+- produce a demo script (curl commands) to exercise key flows
+- add docker-compose for SQL Server and instructions
+

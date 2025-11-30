@@ -1,0 +1,81 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using project1.Application.DTOs.Admin;
+using project1.Application.Interfaces;
+using System;
+using System.Threading.Tasks;
+using project1.Application.Helpers;
+
+namespace project1.Controllers.Admin
+{
+    [ApiController]
+    [Route("api/admin/[controller]")]
+    [Authorize(Roles = "Admin")]
+    public class DepartmentsController : ControllerBase
+    {
+        private readonly IDepartmentService _service;
+
+        public DepartmentsController(IDepartmentService service)
+        {
+            _service = service;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> Get(int page = 1, int pageSize = 10, string? filter = null)
+        {
+            var result = await _service.GetDepartmentsAsync(page, pageSize, filter);
+            PaginationHelper.AddPaginationHeader(Response, result);
+            return Ok(result);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(Guid id)
+        {
+            var dto = await _service.GetByIdAsync(id);
+            if (dto == null) return NotFound();
+            return Ok(dto);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] CreateDepartmentRequest request)
+        {
+            try
+            {
+                var dto = await _service.CreateAsync(request);
+                return CreatedAtAction(nameof(GetById), new { id = dto.Id }, dto);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(Guid id, [FromBody] CreateDepartmentRequest request)
+        {
+            try
+            {
+                await _service.UpdateAsync(id, request);
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(Guid id)
+        {
+            try
+            {
+                await _service.DeleteAsync(id);
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+    }
+}

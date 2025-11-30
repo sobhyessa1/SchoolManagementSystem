@@ -1,0 +1,92 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using project1.Application.DTOs.Auth;
+using project1.Application.Interfaces;
+using System.Threading.Tasks;
+using System;
+
+namespace project1.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class AuthController : ControllerBase
+    {
+        private readonly IAuthService _authService;
+
+        public AuthController(IAuthService authService)
+        {
+            _authService = authService;
+        }
+
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        {
+            try
+            {
+                var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+                var result = await _authService.AuthenticateAsync(request, ip);
+                return Ok(result);
+            }
+            catch (System.UnauthorizedAccessException)
+            {
+                return Unauthorized();
+            }
+        }
+
+        [HttpPost("refresh-token")]
+        public async Task<IActionResult> Refresh([FromBody] string token)
+        {
+            try
+            {
+                var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+                var result = await _authService.RefreshTokenAsync(token, ip);
+                return Ok(result);
+            }
+            catch (System.UnauthorizedAccessException)
+            {
+                return Unauthorized();
+            }
+        }
+
+        [HttpPost("revoke-token")]
+        public async Task<IActionResult> Revoke([FromBody] string token)
+        {
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+            await _authService.RevokeRefreshTokenAsync(token, ip);
+            return NoContent();
+        }
+
+        [HttpPost("logout-all")]
+        [Authorize]
+        public async Task<IActionResult> LogoutAll()
+        {
+            var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (!Guid.TryParse(sub, out var userId)) return Forbid();
+            await _authService.RevokeAllForUserAsync(userId);
+            return NoContent();
+        }
+
+        [HttpPost("register")]
+        public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+        {
+            try
+            {
+                var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+
+                // Only allow Admin to create Teacher/Admin via admin request. Public register allowed for Students only.
+                var isAdminRequest = User?.IsInRole("Admin") == true;
+
+                var result = await _authService.RegisterAsync(request, ip, isAdminRequest);
+                return Ok(result);
+            }
+            catch (System.UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (System.InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+    }
+}
