@@ -1,0 +1,172 @@
+@host = http://localhost:5000
+
+### 1. Register Admin
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "name": "Admin User",
+  "email": "admin@school.test",
+  "password": "Admin@123",
+  "role": "Admin"
+}
+
+### 2. Login Admin
+# @name loginAdmin
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@school.test",
+  "password": "Admin@123"
+}
+
+@authToken = {{loginAdmin.response.body.accessToken}}
+
+### 3. Create Department
+# @name createDept
+POST {{host}}/api/admin/departments
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Computer Science",
+  "description": "CS Dept"
+}
+
+@deptId = {{createDept.response.body.id}}
+
+### 4. Create Course
+# @name createCourse
+POST {{host}}/api/admin/courses
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Intro to Programming",
+  "code": "CS101",
+  "departmentId": "{{deptId}}",
+  "credits": 3
+}
+
+@courseId = {{createCourse.response.body.id}}
+
+### 5. Register Teacher
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "name": "Teacher One",
+  "email": "teacher1@school.test",
+  "password": "Teacher@123",
+  "role": "Teacher"
+}
+
+### 6. Login Teacher
+# @name loginTeacher
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "teacher1@school.test",
+  "password": "Teacher@123"
+}
+
+@teacherToken = {{loginTeacher.response.body.accessToken}}
+@teacherId = {{loginTeacher.response.body.id}}
+
+### 7. Create Class (Teacher)
+# @name createClass
+POST {{host}}/api/teacher/classes
+Authorization: Bearer {{teacherToken}}
+Content-Type: application/json
+
+{
+  "name": "CS101 - Fall 2024",
+  "courseId": "{{courseId}}",
+  "teacherId": "{{teacherId}}",
+  "semester": 1,
+  "startDate": "2024-09-01T00:00:00Z",
+  "endDate": "2024-12-31T00:00:00Z"
+}
+
+@classId = {{createClass.response.body.id}}
+
+### 8. Register Student
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "name": "Student One",
+  "email": "student1@school.test",
+  "password": "Student@123",
+  "role": "Student"
+}
+
+### 9. Login Student
+# @name loginStudent
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "student1@school.test",
+  "password": "Student@123"
+}
+
+@studentToken = {{loginStudent.response.body.accessToken}}
+@studentId = {{loginStudent.response.body.id}}
+
+### 10. Enroll Student in Class (Teacher Action)
+POST {{host}}/api/teacher/classes/{{classId}}/students
+Authorization: Bearer {{teacherToken}}
+Content-Type: application/json
+
+{
+  "studentId": "{{studentId}}"
+}
+
+### 11. Create Assignment (Teacher)
+# @name createAssignment
+POST {{host}}/api/teacher/assignments
+Authorization: Bearer {{teacherToken}}
+Content-Type: application/json
+
+{
+  "classId": "{{classId}}",
+  "title": "Homework 1",
+  "description": "First assignment",
+  "dueDate": "2025-12-31T23:59:59Z"
+}
+
+@assignmentId = {{createAssignment.response.body.id}}
+
+### 12. Submit Assignment (Student)
+POST {{host}}/api/student/submissions/{{assignmentId}}/submit
+Authorization: Bearer {{studentToken}}
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="FileUrl"
+
+http://example.com/file.pdf
+--boundary--
+
+### 13. Mark Attendance (Teacher)
+POST {{host}}/api/teacher/attendance
+Authorization: Bearer {{teacherToken}}
+Content-Type: application/json
+
+{
+  "classId": "{{classId}}",
+  "date": "2024-11-30T00:00:00Z",
+  "entries": [
+    {
+      "studentId": "{{studentId}}",
+      "status": "Present"
+    }
+  ]
+}
+
+### 14. Get Student Grades
+GET {{host}}/api/student/student/grades
+Authorization: Bearer {{studentToken}}
